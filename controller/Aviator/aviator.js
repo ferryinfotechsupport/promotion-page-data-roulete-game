@@ -1,6 +1,7 @@
 const con = require("../../config/database");
 
 exports.promotionCount = async (req, res) => {
+  
   const { id } = req.query;
   if (!id || isNaN(id)) {
     return res.status(400).json({
@@ -18,38 +19,40 @@ exports.promotionCount = async (req, res) => {
           er: err,
         });
       }
-    
+
       if (result?.length <= 0)
         return res.status(400).json({
           msg: "user not found",
         });
-    
+
       console.log(result);
-    
+
       const array = result.map((i) => ({
         ...i,
         count: 0,
         teamcount: 0,
         directReferrals: [],
       }));
-    
+
       let new_data = updateReferralCountnew(array).find((i) => i.id == id);
       const levels = Array.from({ length: 20 }, (_, i) => `level_${i + 1}`);
-    
+
       let direct_ids = new_data.directReferrals?.map((i) => i?.c_id);
-    
+
       let indirect_ids = [];
       for (let i = levels.length - 1; i >= 0; i--) {
         let currentLevel = new_data?.teamMembersByLevel[levels[i - 1]];
         let nextLevel = new_data?.teamMembersByLevel[levels[i]];
-    
+
         if (currentLevel && nextLevel) {
           let idsToRemove = currentLevel.map((item) => item.id);
-          nextLevel = nextLevel.filter((item) => !idsToRemove.includes(item.id));
+          nextLevel = nextLevel.filter(
+            (item) => !idsToRemove.includes(item.id)
+          );
           new_data.teamMembersByLevel[levels[i]] = nextLevel;
         }
       }
-    
+
       for (let i = 1; i <= 20; i++) {
         if (new_data.teamMembersByLevel[`level_${i}`]?.length > 0) {
           indirect_ids.push(
@@ -57,9 +60,9 @@ exports.promotionCount = async (req, res) => {
           );
         }
       }
-    
+
       new_data = { ...new_data, deposit_member_amount: [] };
-    
+
       const promises = [];
       for (let i = 1; i <= 20; i++) {
         if (new_data.teamMembersByLevel[`level_${i}`]?.length > 0) {
@@ -68,9 +71,12 @@ exports.promotionCount = async (req, res) => {
           );
           const promise = new Promise((resolve, reject) => {
             con.query(
-              `SELECT SUM(tr15_amt) AS total_amount,count(*) AS total_member FROM tr15_fund_request WHERE tr15_status = 'Success' AND tr15_uid IN (${levelIds.join(
-                ","
-              )});`,
+              `SELECT SUM(amount) AS total_amount 
+FROM roulette_bet 
+WHERE ${levelIds.length > 0 ? `userid IN (${levelIds.join(",")})` : "1 = 0"}
+  AND datetime >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+  AND datetime < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY);
+;`,
               (err, resultteamamount) => {
                 if (err) {
                   console.error(err);
@@ -86,12 +92,17 @@ exports.promotionCount = async (req, res) => {
           promises.push(0);
         }
       }
-    
+
       Promise.all(promises)
         .then((deposit_member_amounts) => {
           new_data.deposit_member_amount = deposit_member_amounts;
           con.query(
-  `SELECT SUM(tr15_amt) AS total_amount,COUNT(DISTINCT tr15_uid) AS total_member FROM tr15_fund_request WHERE tr15_status = 'Success' AND ${direct_ids.length > 0 ? `tr15_uid IN (${direct_ids.join(",")})` : "1 = 0"};`,
+            `SELECT SUM(amount) AS total_amount 
+FROM roulette_bet 
+WHERE ${direct_ids.length > 0 ? `userid IN (${direct_ids.join(",")})` : "1 = 0"}
+  AND datetime >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+  AND datetime < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY);
+;`,
             (err, result) => {
               if (err) {
                 console.error(err);
@@ -101,9 +112,18 @@ exports.promotionCount = async (req, res) => {
                   er: err,
                 });
               }
-    
+
               con.query(
-                `SELECT SUM(tr15_amt) AS total_amount,COUNT(DISTINCT tr15_uid) AS total_member FROM tr15_fund_request WHERE tr15_status = 'Success' AND ${indirect_ids.length > 0 ? `tr15_uid IN (${indirect_ids.join(",")})` : "1 = 0"};`,
+                `SELECT SUM(amount) AS total_amount 
+FROM roulette_bet 
+WHERE ${
+                  indirect_ids.length > 0
+                    ? `userid IN (${indirect_ids.join(",")})`
+                    : "1 = 0"
+                }
+  AND datetime >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+  AND datetime < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY);
+;`,
                 (err, resultteam) => {
                   if (err) {
                     console.error(err);
@@ -113,7 +133,8 @@ exports.promotionCount = async (req, res) => {
                       er: err,
                     });
                   }
-    
+
+                  console.log(new_data, "annad");
                   return res.status(200).json({
                     data: {
                       ...new_data,
@@ -138,7 +159,6 @@ exports.promotionCount = async (req, res) => {
           });
         });
     });
-    
   } catch (e) {
     console.error(e);
     return res.status(500).json({
